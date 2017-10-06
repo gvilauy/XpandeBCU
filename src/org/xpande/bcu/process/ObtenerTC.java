@@ -1,10 +1,15 @@
 package org.xpande.bcu.process;
 
 import org.adempiere.exceptions.AdempiereException;
+import org.compiere.model.MAcctSchema;
+import org.compiere.model.MClient;
+import org.compiere.model.MConversionRate;
+import org.compiere.model.X_C_Conversion_Rate;
 import org.compiere.process.ProcessInfoParameter;
 import org.compiere.process.SvrProcess;
 import org.compiere.util.TimeUtil;
 import org.xpande.bcu.ws.*;
+import org.xpande.core.utils.DateUtils;
 import org.xpande.financial.model.MZFinancialConfig;
 import org.xpande.financial.model.MZFinancialConfigTC;
 
@@ -13,7 +18,9 @@ import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+
 
 /**
  * Proceso para cargar Tasa de Cambio de manera automática mediante WebServices del BCU.
@@ -70,6 +77,9 @@ public class ObtenerTC extends SvrProcess {
                 }
             }
 
+            // Compañia tomada del modelo de configuración financiera
+            MClient client = new MClient(getCtx(), financialConfig.getAD_Client_ID(), null);
+
             // Array de codigos de moneda a procesar
             short[] codigosMoneda = new short[configTCS.size()];
             for (int i = 0 ; i < configTCS.size() ; i++) {
@@ -112,47 +122,31 @@ public class ObtenerTC extends SvrProcess {
             }
 
             for (int i = 0; i < datoscotizaciones.length; i++){
-                
-            }
 
-            /*
-            List<DatoscotizacionesDato> listdatoscotizaciones = Arrays.asList(datos);
-            for (DatoscotizacionesDato dato : listdatoscotizaciones) {
+                DatoscotizacionesDato datoCotiz = datoscotizaciones[i];
 
-                // ==========================================================
-                // =  Cargo moneda en ADempiere								=
-                // ==========================================================
-
-                MLoadRateLine mLoadRateLine = getMLoadRateLineByCurrencyCode(dato.getMoneda());
-
-                if (MSysConfig.getBooleanValue("UY_WS_Cotiza_monedaCompra", true, this.getAD_Client_ID())) {
-                    setMConversionRate((MCurrency) mLoadRateLine.getC_Currency(), BigDecimal.valueOf(dato.getTCC()));
-                } else {
-                    setMConversionRate((MCurrency) mLoadRateLine.getC_Currency(), BigDecimal.valueOf(dato.getTCV()));
+                MZFinancialConfigTC configTC = financialConfig.getConfigTCByCurrencyTCCode(String.valueOf(datoCotiz.getMoneda()));
+                if (configTC == null){
+                    continue;
                 }
-                mLoadRateLines.remove(mLoadRateLine);
-            }
 
-            // Recorro las monedas que no fueron obtenidas del web service para cargarlas con la �ltima tasa de cambio
-            for (MLoadRateLine line : mLoadRateLines) {
-                setMConversionRate((MCurrency) line.getC_Currency(), null);
-            }
-            */
+                Date fechaTasa = DateUtils.addDays(datoCotiz.getFecha(), 1);
 
-
-
-            for (MZFinancialConfigTC configTC: configTCS){
-
-            }
-
-            // Loop entre Rango de Fechas. Cargo tasa para cada fecha del rango.
-            LocalDate start = this.startDate.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
-            LocalDate end = this.endDate.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
-
-            for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
-
-
-
+                MConversionRate conversionRate = new MConversionRate(getCtx(), 0, get_TrxName());
+                conversionRate.set_ValueOfColumn(X_C_Conversion_Rate.COLUMNNAME_AD_Client_ID, financialConfig.getAD_Client_ID());
+                conversionRate.setAD_Org_ID(0);
+                if (configTC.isCargarTCCompra()){
+                    conversionRate.setMultiplyRate(BigDecimal.valueOf(datoCotiz.getTCC()));
+                }
+                else{
+                    conversionRate.setMultiplyRate(BigDecimal.valueOf(datoCotiz.getTCV()));
+                }
+                conversionRate.setC_ConversionType_ID(114);
+                conversionRate.setC_Currency_ID(configTC.getC_Currency_ID());
+                conversionRate.setC_Currency_ID_To(client.getC_Currency_ID());
+                conversionRate.setValidFrom(new Timestamp(fechaTasa.getTime()));
+                conversionRate.setValidTo(new Timestamp(fechaTasa.getTime()));
+                conversionRate.saveEx();
             }
 
         }
