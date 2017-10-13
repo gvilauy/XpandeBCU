@@ -63,6 +63,13 @@ public class ObtenerTC extends SvrProcess {
 
         try{
 
+            if (this.startDate == null){
+                this.startDate = new Timestamp(System.currentTimeMillis());
+            }
+            if (this.endDate == null){
+                this.endDate = new Timestamp(System.currentTimeMillis());
+            }
+
             this.startDate = TimeUtil.trunc(this.startDate, TimeUtil.TRUNC_DAY);
             this.endDate = TimeUtil.trunc(this.endDate, TimeUtil.TRUNC_DAY);
 
@@ -147,6 +154,7 @@ public class ObtenerTC extends SvrProcess {
                 conversionRate.setValidFrom(new Timestamp(fechaTasa.getTime()));
                 conversionRate.setValidTo(new Timestamp(fechaTasa.getTime()));
                 conversionRate.saveEx();
+
             }
 
         }
