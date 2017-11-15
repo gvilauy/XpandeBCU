@@ -9,6 +9,7 @@ import org.compiere.process.ProcessInfoParameter;
 import org.compiere.process.SvrProcess;
 import org.compiere.util.TimeUtil;
 import org.xpande.bcu.ws.*;
+import org.xpande.core.utils.CurrencyUtils;
 import org.xpande.core.utils.DateUtils;
 import org.xpande.financial.model.MZFinancialConfig;
 import org.xpande.financial.model.MZFinancialConfigTC;
@@ -17,9 +18,12 @@ import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
+import java.util.stream.Stream;
 
 
 /**
@@ -139,7 +143,7 @@ public class ObtenerTC extends SvrProcess {
 
                 Date fechaTasa = DateUtils.addDays(datoCotiz.getFecha(), 1);
 
-                MConversionRate conversionRate = new MConversionRate(getCtx(), 0, get_TrxName());
+                MConversionRate conversionRate = new MConversionRate(getCtx(), 0, null);
                 conversionRate.set_ValueOfColumn(X_C_Conversion_Rate.COLUMNNAME_AD_Client_ID, financialConfig.getAD_Client_ID());
                 conversionRate.setAD_Org_ID(0);
                 if (configTC.isCargarTCCompra()){
@@ -155,6 +159,47 @@ public class ObtenerTC extends SvrProcess {
                 conversionRate.setValidTo(new Timestamp(fechaTasa.getTime()));
                 conversionRate.saveEx();
 
+            }
+
+            // Se da el caso que para algunas monedas no se publica tipo de cambio los fines de semana o feriados.
+            // Es por estos casos, que se debe verificar por cada fecha-moneda, si se cargo un TC. Sino, cargo con valor de fecha anterior.
+            LocalDate start = this.startDate.toLocalDateTime().toLocalDate();
+            LocalDate end = this.endDate.toLocalDateTime().toLocalDate();
+            LocalDate next = start.minusDays(1);
+            while ((next = next.plusDays(1)).isBefore(end.plusDays(1))) {
+
+                // Fecha a considerar
+                Date dateTC = Date.from(next.atStartOfDay().atZone(ZoneId.systemDefault()).toInstant());
+                Timestamp tsTC = new Timestamp(dateTC.getTime());
+                tsTC = TimeUtil.trunc(tsTC, TimeUtil.TRUNC_DAY);
+
+                // Para cada moneda a considerar
+                for (MZFinancialConfigTC configTC: configTCS){
+                    // Verifico si se cargo tasa de cambio para esa fecha+1 - moneda
+                    Date dateFechaTC = new Date(tsTC.getTime());
+                    dateFechaTC = DateUtils.addDays(dateFechaTC, 1);
+                    Timestamp tsFechaTC = new Timestamp(dateFechaTC.getTime());
+                    BigDecimal multiplyRate = CurrencyUtils.getCurrencyRateToAcctSchemaCurrency(getCtx(), client.get_ID(), 0,
+                            configTC.getC_Currency_ID(), client.getC_Currency_ID(), 114, tsFechaTC, null);
+                    if (multiplyRate == null){
+                        // No se cargo, busco la del día anterior.
+                        multiplyRate = CurrencyUtils.getCurrencyRateToAcctSchemaCurrency(getCtx(), client.get_ID(), 0,
+                                configTC.getC_Currency_ID(), client.getC_Currency_ID(), 114, tsTC, null);
+                        if (multiplyRate != null){
+                            // Obtuve tasa de ayer, guardo tipo de cambio
+                            MConversionRate conversionRate = new MConversionRate(getCtx(), 0, null);
+                            conversionRate.set_ValueOfColumn(X_C_Conversion_Rate.COLUMNNAME_AD_Client_ID, financialConfig.getAD_Client_ID());
+                            conversionRate.setAD_Org_ID(0);
+                            conversionRate.setMultiplyRate(multiplyRate);
+                            conversionRate.setC_ConversionType_ID(114);
+                            conversionRate.setC_Currency_ID(configTC.getC_Currency_ID());
+                            conversionRate.setC_Currency_ID_To(client.getC_Currency_ID());
+                            conversionRate.setValidFrom(tsFechaTC);
+                            conversionRate.setValidTo(tsFechaTC);
+                            conversionRate.saveEx();
+                        }
+                    }
+                }
             }
 
         }
